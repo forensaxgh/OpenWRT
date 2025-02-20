@@ -1,0 +1,244 @@
+name: Build and Release OpenWrt x86-64
+on: 
+  workflow_dispatch:
+  schedule:
+    - cron: 0 20 * * *
+env:
+  TZ: Asia/Shanghai
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    outputs:
+      repo_url: ${{ steps.download_code.outputs.repo_url }}
+      latest_branch: ${{ steps.download_code.outputs.latest_branch }}
+      latest_tag: ${{ steps.download_code.outputs.latest_tag }}
+
+    steps:
+    - name: 检查服务器配置
+      run: |
+        echo "警告⚠"
+        echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+        echo -e "已知CPU型号(降序): 7763，8370C，8272CL，8171M，E5-2673\n"
+        echo "--------------------------CPU信息--------------------------"
+        echo "CPU物理数量: $(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+        echo "CPU核心数量: $(nproc)"
+        echo -e "CPU型号信息:$(cat /proc/cpuinfo | grep -m1 name | awk -F: '{print $2}')\n"
+        echo "--------------------------内存信息--------------------------"
+        echo "已安装内存详细信息:"
+        echo -e "$(sudo lshw -short -C memory | grep GiB)\n"
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+        
+    - name: 查看IP
+      run: |
+        curl -4 ipinfo.io
+        
+    - name: 最大化磁盘空间
+      uses: easimon/maximize-build-space@master
+      with:
+        overprovision-lvm: 'true'
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+
+    - name: 检查硬盘信息
+      run: |
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+
+
+    - name: 安装依赖
+      run: |
+        sudo apt update
+        sudo apt install build-essential clang flex bison g++ gawk \
+        gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+        python3-distutils rsync unzip zlib1g-dev file wget qemu-utils
+        echo "-------------------------查看工作目录-------------------------"
+        echo "当前位置："&& pwd
+        echo "当前目录文件："&& ls -la
+    - name: 迁出代码
+      uses: actions/checkout@v3
+    - name: 查看工作目录
+      run: |
+        echo "当前位置："&& pwd
+        echo "当前目录文件："&& ls -la
+    - name: 下载OpenWRT及其他包代码
+      id: download_code
+      run: |
+        REPO_URL=https://github.com/openwrt/openwrt
+        git clone $REPO_URL openwrt
+        cd openwrt
+        echo 所有分支：&&git branch -r
+        echo 所有标签：&&git tag
+        LATEST_BRANCH=$(git branch -r | sed 's/origin\///'|tail -n1)
+        LATEST_TAG=$(git tag | grep -v 'rc'|tail -n1)
+        echo 当前最新分支：$LATEST_BRANCH
+        echo 选择最新非RC标签：$LATEST_TAG
+        git checkout $LATEST_TAG
+        rm -rf package/helloworld
+        git clone --depth=1 https://github.com/fw876/helloworld.git package/helloworld
+        git clone https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
+        git clone https://github.com/openwrt/packages.git ../gogogo
+        git clone https://github.com/xiaorouji/openwrt-passwall.git package/openwrt-passwall
+        sed -i 's/192.168.1.1/10.10.10.100/g' package/base-files/files/bin/config_generate
+        sed -i 's/192.168./10.10./g' package/base-files/files/bin/config_generate
+        HASH=$(openssl passwd -1 -salt DLXGbdIi ${{ github.repository_owner }})
+        sed -i "s|^root:::0:99999:7:::|root:$HASH:0:0:99999:7:::|" package/base-files/files/etc/shadow
+        cat package/base-files/files/etc/shadow
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        rm -rf feeds/packages/lang/golang
+        cp -r ../gogogo/lang/golang/ feeds/packages/lang/
+        git clone https://github.com/linkease/istore.git ./package/istore
+        git clone https://github.com/linkease/nas-packages.git ./package/nas-packages
+        git clone https://github.com/linkease/nas-packages-luci.git ./package/nas-packages-luci
+        echo "repo_url=${REPO_URL}" >> $GITHUB_OUTPUT
+        echo "latest_branch=${LATEST_BRANCH}" >> $GITHUB_OUTPUT
+        echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+        echo "-------------------------查看工作目录-------------------------"
+        echo "当前位置："&& pwd
+        echo "当前目录文件："&& ls -la
+    - name: 复制.config文件
+      run: |
+        cd openwrt
+        cp ../config/diffconfig .config
+        make defconfig
+    - name: 预下载软件包
+      run: |
+        cd openwrt 
+        make download -j$(nproc) || make download -j1 V=s
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+    - name: 开始编译
+      run: |
+        cd openwrt
+        make -j$(nproc) || {
+            echo "多线程编译失败，尝试单线程编译..."
+            make -j1 || {
+                echo "单线程编译失败，开启详细日志..."
+                make -j1 V=s || {
+                    echo "尝试修正 Rust Makefile"
+                    sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile || {
+                        echo "Rust Makefile 修改失败，查看文件内容"
+                        cat ./feeds/packages/lang/rust/Makefile
+                    }
+                    echo "修改Makefile成功，查看文件内容："
+                    cat ./feeds/packages/lang/rust/Makefile
+                    echo "重新尝试编译..."
+                    make -j$(nproc) || make -j1 || make -j1 V=s
+                }
+            }
+        }
+       
+
+    - name: 生成QCOW2镜像
+      run: |
+        # 确保目录存在
+        cd openwrt/bin
+
+        # 遍历并处理文件
+        find . -type f \( -name "*.vmdk.gz" -o -name "*.vmdk" \) | while read -r FILE; do
+            if [[ $FILE == *.vmdk.gz ]]; then
+                # 解压 .vmdk.gz 文件到临时目录
+                echo "解压文件: $FILE"
+                TEMP_DIR=$(mktemp -d)
+                cp "$FILE" "$TEMP_DIR/"
+                gunzip "$TEMP_DIR/$(basename "$FILE")"
+                VMDK_FILE="$TEMP_DIR/$(basename "${FILE%.gz}")"
+
+                # 转换为 .qcow2 文件
+                QCOW2_FILE="${FILE%.vmdk.gz}.qcow2"
+                echo "转换 $VMDK_FILE 为 $QCOW2_FILE"
+                qemu-img convert -f vmdk -O qcow2 "$VMDK_FILE" "$QCOW2_FILE"
+
+                # 压缩 .qcow2 文件为 .qcow2.gz
+                echo "压缩 $QCOW2_FILE 为 ${QCOW2_FILE}.gz"
+                gzip "$QCOW2_FILE"
+
+                # 删除临时解压的 .vmdk 文件
+                echo "清理临时文件"
+                rm -f "$VMDK_FILE"
+                rmdir "$TEMP_DIR"
+
+                # 计算生成的 .qcow2.gz 文件的 SHA256 值
+                FINAL_FILE="${QCOW2_FILE}.gz"
+            else
+                # 文件是 .vmdk，直接转换为 .qcow2
+                QCOW2_FILE="${FILE%.vmdk}.qcow2"
+                echo "转换 $FILE 为 $QCOW2_FILE"
+                qemu-img convert -f vmdk -O qcow2 "$FILE" "$QCOW2_FILE"
+
+                # 计算生成的 .qcow2 文件的 SHA256 值
+                FINAL_FILE="$QCOW2_FILE"
+            fi
+
+            # 追加 SHA256 值到 sha256sums 文件
+            echo "计算 $FINAL_FILE 的 SHA256 值并更新到 sha256sums"
+            sha256sum "$FINAL_FILE" >> ./targets/x86/64/sha256sums
+        done
+
+        echo "所有操作完成！"
+        ls -la ./targets/x86/64/
+        cat ./targets/x86/64/sha256sums
+        
+    - name : 上传固件
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt Bin
+        path: openwrt/bin
+    - name: 检查硬盘信息
+      run: |
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+
+
+  release:
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+    - name: 下载固件
+      uses: actions/download-artifact@v4
+      with:
+        name: OpenWrt Bin
+        path: openwrt/bin
+    - name: 打包Bin目录
+      run: |
+        zip -q -s 2000m -r OpenWRT_Bin_v$(date +"%Y.%m.%d").zip openwrt/bin
+        for file in OpenWRT_Bin_v$(date +"%Y.%m.%d").*; do
+            echo "File: $file"
+            echo "Size: $(du -h "$file" | cut -f1)"  # 输出文件大小
+            echo "MD5 checksum: $(md5sum "$file" | awk '{print $1}')"  # 计算MD5
+            echo "SHA256 checksum: $(sha256sum "$file" | awk '{print $1}')"  # 计算SHA256
+            echo "-------------------------"
+        done
+    - name: 生成发布标签
+      id: tag
+      run: |
+        echo "release_tag=v$(date +"%Y.%m.%d")" >> $GITHUB_OUTPUT
+        touch release.txt
+        echo "
+        💻 架构: x86_64
+
+        📂 源码: ${{ needs.build.outputs.repo_url }}
+
+        🔗 标签: ${{ needs.build.outputs.latest_tag }}
+
+        ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
+
+        🌐 管理地址: 10.10.10.100
+
+        👤 用户名: root
+
+        🔒 密码: @${{ github.repository_owner }} " >> release.txt
+
+    - name: 自动发布固件到 Releases
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: |
+          openwrt/bin/targets/x86/64/*
+          openwrt/bin/packages/x86_64/base/*passwall*
+          openwrt/bin/packages/x86_64/base/*ssr-plus*
+          OpenWRT_Bin*.*
