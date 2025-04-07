@@ -114,7 +114,13 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
     - name: 开始编译
       run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source $HOME/.cargo/env
+        rustup install nightly
+        rustup default nightly
         cd openwrt
+        cd package/helloworld/shadowsocks-rust
+        cargo build --release
         make -j$(nproc) || {
             echo "编译信息：多线程编译失败，尝试单线程编译..."
             make -j1 || {
