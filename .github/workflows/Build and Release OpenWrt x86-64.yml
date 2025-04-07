@@ -250,3 +250,6 @@ jobs:
           openwrt/bin/packages/x86_64/base/*passwall*
           openwrt/bin/packages/x86_64/base/*ssr-plus*
           OpenWRT_Bin*.*
+    - name: Setup tmate session
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
