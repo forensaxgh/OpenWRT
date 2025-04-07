@@ -192,11 +192,15 @@ jobs:
       with:
         name: OpenWrt Bin
         path: openwrt/bin
+        
     - name: 检查硬盘信息
       run: |
         echo "--------------------------硬盘信息--------------------------"
         echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
-
+        
+    - name: 启动SSH调试
+      if: ${{ failure() }}
+      uses: mxschmitt/action-tmate@v3
 
   release:
     runs-on: ubuntu-22.04
