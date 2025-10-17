@@ -7,7 +7,7 @@ env:
   TZ: Asia/Shanghai
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       repo_url: ${{ steps.download_code.outputs.repo_url }}
       latest_branch: ${{ steps.download_code.outputs.latest_branch }}
@@ -106,11 +106,6 @@ jobs:
         cd openwrt
         cp ../config/diffconfig .config
         make defconfig
-    - name: 设置编译器为 GCC
-      run: |
-        echo "export CC=gcc" >> $GITHUB_ENV
-        echo "export CXX=g++" >> $GITHUB_ENV
-        echo "使用 GCC 作为编译器"
         
     - name: 预下载软件包
       run: |
