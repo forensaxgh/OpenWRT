@@ -106,6 +106,12 @@ jobs:
         cd openwrt
         cp ../config/diffconfig .config
         make defconfig
+    - name: 设置编译器为 GCC
+      run: |
+        echo "export CC=gcc" >> $GITHUB_ENV
+        echo "export CXX=g++" >> $GITHUB_ENV
+        echo "使用 GCC 作为编译器"
+        
     - name: 预下载软件包
       run: |
         cd openwrt 
