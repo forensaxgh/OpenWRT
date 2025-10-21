@@ -119,6 +119,7 @@ jobs:
 
     - name: 修正 Rust Makefile
       run: |
+        cd openwrt
         echo "尝试修正 Rust Makefile"
         sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile && {
             # 仅在 sed 成功时执行
