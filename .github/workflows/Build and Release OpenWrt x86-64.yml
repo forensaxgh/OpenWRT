@@ -120,12 +120,18 @@ jobs:
     - name: 修正 Rust Makefile
       run: |
         echo "尝试修正 Rust Makefile"
-        sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile || {
-            echo "编译信息：Rust Makefile 修改失败，查看文件内容"
+        sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile && {
+            # 仅在 sed 成功时执行
+            echo "编译信息：修改Makefile成功，查看文件内容："
             cat ./feeds/packages/lang/rust/Makefile
+        } || {
+            # 仅在 sed 失败时执行
+            echo "编译信息：Rust Makefile 修改失败，查看文件内容"
+            # 失败时也cat，有助于调试（如果文件存在的话）
+            cat ./feeds/packages/lang/rust/Makefile 2>/dev/null
+            # 在编译脚本中，失败时通常应该退出
+            # exit 1 
         }
-        echo "编译信息：修改Makefile成功，查看文件内容："
-        cat ./feeds/packages/lang/rust/Makefile
         
     - name: 开始编译
       run: |
