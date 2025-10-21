@@ -56,6 +56,10 @@ jobs:
         echo "-------------------------查看工作目录-------------------------"
         echo "当前位置："&& pwd
         echo "当前目录文件："&& ls -la
+        echo "修复g++"
+        sudo apt-get install -y g++-13
+        echo "export HOSTCC=gcc-13" >> $GITHUB_ENV
+        echo "export HOSTCXX=g++-13" >> $GITHUB_ENV
         
     - name: 迁出代码
       uses: actions/checkout@v3
