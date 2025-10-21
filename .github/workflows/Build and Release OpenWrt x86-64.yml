@@ -47,7 +47,6 @@ jobs:
         echo "--------------------------硬盘信息--------------------------"
         echo "硬盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
 
-
     - name: 安装依赖
       run: |
         sudo apt update
@@ -57,12 +56,15 @@ jobs:
         echo "-------------------------查看工作目录-------------------------"
         echo "当前位置："&& pwd
         echo "当前目录文件："&& ls -la
+        
     - name: 迁出代码
       uses: actions/checkout@v3
+      
     - name: 查看工作目录
       run: |
         echo "当前位置："&& pwd
         echo "当前目录文件："&& ls -la
+        
     - name: 下载OpenWRT及其他包代码
       id: download_code
       run: |
@@ -101,17 +103,30 @@ jobs:
         echo "-------------------------查看工作目录-------------------------"
         echo "当前位置："&& pwd
         echo "当前目录文件："&& ls -la
+        
     - name: 复制.config文件
       run: |
         cd openwrt
         cp ../config/diffconfig .config
         make defconfig
+        
     - name: 预下载软件包
       run: |
         cd openwrt 
         make download -j$(nproc) || make download -j1 V=s
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+
+    - name: 修正 Rust Makefile
+      run: |
+        echo "尝试修正 Rust Makefile"
+        sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile || {
+            echo "编译信息：Rust Makefile 修改失败，查看文件内容"
+            cat ./feeds/packages/lang/rust/Makefile
+        }
+        echo "编译信息：修改Makefile成功，查看文件内容："
+        cat ./feeds/packages/lang/rust/Makefile
+        
     - name: 开始编译
       run: |
         cd openwrt
@@ -119,21 +134,10 @@ jobs:
             echo "编译信息：多线程编译失败，尝试单线程编译..."
             make -j1 || {
                 echo "编译信息：单线程编译失败，开启详细日志..."
-                make -j1 V=s || {
-                    echo "编译信息：尝试修正 Rust Makefile"
-                    sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' ./feeds/packages/lang/rust/Makefile || {
-                        echo "编译信息：Rust Makefile 修改失败，查看文件内容"
-                        cat ./feeds/packages/lang/rust/Makefile
-                    }
-                    echo "编译信息：修改Makefile成功，查看文件内容："
-                    cat ./feeds/packages/lang/rust/Makefile
-                    echo "编译信息：重新尝试编译..."
-                    make -j$(nproc) || make -j1 || make -j1 V=s
-                }
+                make -j1 V=s 
             }
         }
        
-
     - name: 生成QCOW2镜像
       run: |
         # 确保目录存在
